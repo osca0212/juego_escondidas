@@ -1,0 +1,369 @@
+import Foundation
+
+// -----------------------------
+// Roles permitidos (solo lo esencial)
+// -----------------------------
+enum RolesJuegoEscondidas: CustomStringConvertible {
+    case contando
+    case buscando_jugadores
+    case buscando_escondite
+    case escondido
+    case regresando_a_base
+    case encontrado
+    
+    var description: String {
+        switch self {
+        case .contando: return "Contando"
+        case .buscando_jugadores: return "Buscando jugadores"
+        case .buscando_escondite: return "Buscando escondite"
+        case .escondido: return "Escondido"
+        case .regresando_a_base: return "Regresando a base"
+        case .encontrado: return "Encontrado"
+        }
+    }
+}
+
+// -----------------------------
+// Protocolo para jugadores
+// -----------------------------
+protocol JugadorDeEscondidas: AnyObject {
+    var rol: RolesJuegoEscondidas { get set }
+    var compañeros_de_juego: [JugadorDeEscondidas] { get set }
+    var nombre: String { get set }
+    var lugar_actual: UbicacionFisica? { get set }
+    var visibilidad: Double { get set } 
+    var puntos: Int { get set } 
+    
+    func actualizar(jugadoresGlobales: [JugadorDeEscondidas]) -> Void
+    func establecer_rol(_ rol_nuevo: RolesJuegoEscondidas) -> Bool
+    func agregar_compañero(_ compañero_nuevo: JugadorDeEscondidas) -> Bool
+}
+
+// Implementación por defecto de establecer_rol
+extension JugadorDeEscondidas {
+    func establecer_rol(_ rol_nuevo: RolesJuegoEscondidas) -> Bool {
+        return false
+    }
+}
+
+// -----------------------------
+// Ubicaciones físicas simples
+// -----------------------------
+class UbicacionFisica {
+    let nombre: String
+    var lugares_cercanos: [UbicacionFisica] = []
+    
+    init(_ nombre: String) {
+        self.nombre = nombre
+    }
+    
+    // crea conexión bidireccional
+    func agregar_lugar(_ lugar: UbicacionFisica) -> Bool {
+        if lugares_cercanos.contains(where: { $0.nombre == lugar.nombre }) { return false }
+        lugares_cercanos.append(lugar)
+        if !lugar.lugares_cercanos.contains(where: { $0.nombre == self.nombre }) {
+            lugar.lugares_cercanos.append(self)
+        }
+        return true
+    }
+}
+
+// -----------------------------
+// Clase base Personaje
+// -----------------------------
+class Personaje {
+    var nombre: String
+    var ubicacion: UbicacionFisica?
+    
+    init(_ nombre: String) {
+        self.nombre = nombre
+        self.ubicacion = nil
+    }
+    
+    func establecer_ubicacion(_ nueva: UbicacionFisica) -> Bool {
+        if let actual = ubicacion, actual.nombre == nueva.nombre {
+            return false
+        }
+        ubicacion = nueva
+        return true
+    }
+}
+
+// -----------------------------
+// Jugador jugable (clase principal)
+// -----------------------------
+class PersonajeJugable: Personaje, JugadorDeEscondidas {
+    var visibilidad: Double
+    var rol: RolesJuegoEscondidas = .buscando_escondite
+    var lugar_actual: UbicacionFisica?
+    var numero_contado: Int = 0
+    var compañeros_de_juego: [JugadorDeEscondidas] = []
+    var puntos: Int = 0 // Puntos acumulados por encontrar
+    
+    init(_ nombre: String, visibilidad: Double) {
+        self.visibilidad = min(max(visibilidad, 0.0), 1.0)
+        super.init(nombre)
+        self.lugar_actual = nil
+    }
+    
+    func establecer_rol(_ rol_nuevo: RolesJuegoEscondidas) -> Bool {
+        self.rol = rol_nuevo
+        return true
+    }
+    
+    func agregar_compañero(_ compañero_nuevo: JugadorDeEscondidas) -> Bool {
+        if compañero_nuevo.nombre == self.nombre { return false }
+        if compañeros_de_juego.contains(where: { $0.nombre == compañero_nuevo.nombre }) { return false }
+        compañeros_de_juego.append(compañero_nuevo)
+        return true
+    }
+    
+    func actualizar(jugadoresGlobales: [JugadorDeEscondidas]) {
+        switch rol {
+        case .contando:
+            contar_para_buscar()
+        case .buscando_jugadores:
+            buscar_y_encontrar(jugadoresGlobales: jugadoresGlobales)
+            moverse_al_azar()
+        case .buscando_escondite:
+            explorar_escondite()
+        case .escondido:
+            break
+        case .encontrado:
+            break
+        case .regresando_a_base:
+            if let base = lugar_actual {
+                if Int.random(in: 0...4) == 0 {
+                    rol = .buscando_escondite
+                    print("\(nombre) vuelve a intentar esconderse desde \(base.nombre).")
+                }
+            }
+        }
+    }
+    
+    // -------------------------
+    // Comportamientos auxiliares
+    // -------------------------
+    private func contar_para_buscar() {
+        numero_contado += 1
+        print("→ \(nombre) cuenta: \(numero_contado)")
+        if numero_contado >= 10 {
+            self.rol = .buscando_jugadores
+            print("¡\(nombre) ha terminado de contar y ahora busca!")
+        }
+    }
+    
+    private func explorar_escondite() {
+        // mueve y decide si se queda escondido
+        moverse_al_azar()
+        let quedarse = Int.random(in: 0...10)
+        if quedarse % 5 == 0 {
+            rol = .escondido
+            print("» \(nombre) se ha escondido en \(lugar_actual?.nombre ?? "un lugar desconocido").")
+        } else {
+            print("» \(nombre) busca un buen escondite (actual: \(lugar_actual?.nombre ?? "desconocido")).")
+        }
+    }
+    
+    private func moverse_al_azar() {
+        guard let lugar = lugar_actual else { return }
+        if lugar.lugares_cercanos.isEmpty { return }
+        // decide si moverse
+        if Int.random(in: 0...4) == 0 {
+            let idx = Int.random(in: 0..<lugar.lugares_cercanos.count)
+            let nuevo = lugar.lugares_cercanos[idx]
+            cambiar_de_lugar_a(nuevo)
+            print("→ \(nombre) se mueve a \(nuevo.nombre).")
+        }
+    }
+    
+    private func cambiar_de_lugar_a(_ ubicacion: UbicacionFisica) -> Bool {
+        if let actual = lugar_actual, actual.nombre == ubicacion.nombre { return false }
+        lugar_actual = ubicacion
+        return true
+    }
+    
+    private func buscar_y_encontrar(jugadoresGlobales: [JugadorDeEscondidas]) {
+        guard let miLugar = self.lugar_actual else { return }
+        for jugador in jugadoresGlobales {
+            if jugador.nombre == self.nombre { continue }
+            if jugador.rol == .escondido || jugador.rol == .buscando_escondite {
+                if jugador.lugar_actual?.nombre == miLugar.nombre {
+                    let probDetectar = Int((1.0 - jugador.visibilidad) * 100) 
+                    let chanceDetect = Int(jugador.visibilidad * 100)
+                    let tiro = Int.random(in: 0...100)
+                    if tiro <= chanceDetect {
+                        
+                        
+                        // encontrado
+                        jugador.establecer_rol(.encontrado)
+                        print("✦ \(self.nombre) encontró a \(jugador.nombre) en \(miLugar.nombre)! (+1 punto)")
+                    } else {
+                   
+                        if Int.random(in: 0...50) == 0 {
+                            print("⚠️ ruido: \(self.nombre) sospechó de algo en \(miLugar.nombre) pero no encontró a \(jugador.nombre).")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -----------------------------
+// Funciones de control del juego
+// -----------------------------
+func iniciar_juego(jugadores: [JugadorDeEscondidas], ubicaciones: [UbicacionFisica]) {
+    let idxBuscador = Int.random(in: 0..<jugadores.count)
+    let buscador = jugadores[idxBuscador]
+    for jugador in jugadores {
+        if jugador.nombre == buscador.nombre {
+            _ = jugador.establecer_rol(.contando)
+            if let randomLocation = ubicaciones.randomElement() {
+                jugador.lugar_actual = randomLocation
+            }
+            // reset contador si aplica
+            if let pj = jugador as? PersonajeJugable {
+                pj.numero_contado = 0
+            }
+        } else {
+            _ = jugador.establecer_rol(.buscando_escondite)
+            // asignar lugar aleatorio
+            if let randomLocation = ubicaciones.randomElement() {
+                jugador.lugar_actual = randomLocation
+            }
+        }
+    }
+    for jugador in jugadores {
+        for otro in jugadores {
+            if jugador.nombre != otro.nombre {
+                _ = jugador.agregar_compañero(otro)
+            }
+        }
+    }
+    
+    print("\n=== NUEVO ROUND INICIADO ===")
+    print("Buscador: \(buscador.nombre)")
+    print("---------------------------")
+}
+
+func revisar_estado_del_round(jugadores: [JugadorDeEscondidas]) -> Bool {
+    let hayEscondidos = jugadores.contains { $0.rol == .escondido || $0.rol == .buscando_escondite }
+    return !hayEscondidos
+}
+
+func reiniciar_para_nuevo_round(jugadores: [JugadorDeEscondidas], ubicaciones: [UbicacionFisica]) {
+    for jugador in jugadores {
+        jugador.lugar_actual = ubicaciones.randomElement()
+        jugador.establecer_rol(.buscando_escondite)
+        if let pj = jugador as? PersonajeJugable {
+            pj.numero_contado = 0
+        }
+    }
+}
+
+// Mostrar estado y marcador
+func imprimir_estado(jugadores: [JugadorDeEscondidas], ronda: Int, ciclo: Int) {
+    print("\n--- Ronda \(ronda) · Ciclo \(ciclo) ---")
+    for jugador in jugadores {
+        print("• \(jugador.nombre): \(jugador.rol) | Lugar: \(jugador.lugar_actual?.nombre ?? "—") | Puntos: \(jugador.puntos)")
+    }
+}
+
+// -----------------------------
+// CONFIGURACIÓN inicial (nombres propios y ubicaciones)
+// -----------------------------
+let nombres = ["Lyra", "Kael", "Nara", "Rook", "Miri"] // nombres propios
+var jugadores: [PersonajeJugable] = []
+
+let visibilidades: [Double] = [0.4, 0.2, 0.7, 0.5, 0.3]
+
+for (i, nombre) in nombres.enumerated() {
+    let v = visibilidades[i % visibilidades.count]
+    jugadores.append(PersonajeJugable(nombre, visibilidad: v))
+}
+
+// Ubicaciones del mapa
+let Lobby = UbicacionFisica("Lobby")
+let Patio = UbicacionFisica("Patio")
+let Oficina = UbicacionFisica("Oficina")
+let Sala = UbicacionFisica("Sala de estar")
+let Salon = UbicacionFisica("Salón")
+let Banos = UbicacionFisica("Baños")
+
+Lobby.agregar_lugar(Sala)
+Lobby.agregar_lugar(Patio)
+Lobby.agregar_lugar(Salon)
+Lobby.agregar_lugar(Oficina)
+Sala.agregar_lugar(Banos)
+Salon.agregar_lugar(Banos)
+Patio.agregar_lugar(Salon)
+
+let ubicaciones = [Lobby, Patio, Oficina, Sala, Salon, Banos]
+
+// colocar jugadores aleatoriamente
+for jugador in jugadores {
+    jugador.lugar_actual = ubicaciones.randomElement()
+}
+
+// -----------------------------
+// LOOP de juego principal: múltiples rounds
+// -----------------------------
+let rondasTotales = 3 // número de rounds que quieres simular
+var rondaActual = 0
+
+while rondaActual < rondasTotales {
+    rondaActual += 1
+    // iniciar ronda: elegir buscador y asignar roles iniciales
+    iniciar_juego(jugadores: jugadores.map { $0 as JugadorDeEscondidas }, ubicaciones: ubicaciones)
+    
+    var ciclo = 0
+    let limiteCiclosPorRonda = 50 // tope para evitar loops infinitos
+    
+    // ciclo de la ronda
+    while true {
+        ciclo += 1
+        // cada jugador actúa
+        for jugador in jugadores {
+            jugador.actualizar(jugadoresGlobales: jugadores.map { $0 as JugadorDeEscondidas })
+        }
+        
+        // imprimir estado ocasionalmente
+        if ciclo % 5 == 0 || ciclo == 1 {
+            imprimir_estado(jugadores: jugadores.map { $0 as JugadorDeEscondidas }, ronda: rondaActual, ciclo: ciclo)
+        }
+        
+        // revisar fin de ronda: si ya no hay escondidos -> termina
+        if revisar_estado_del_round(jugadores: jugadores.map { $0 as JugadorDeEscondidas }) {
+            print("\n🏁 Round \(rondaActual) finalizado después de \(ciclo) ciclos.")
+            break
+        }
+        
+        if ciclo >= limiteCiclosPorRonda {
+            print("\n⏱️ Límite de ciclos alcanzado en ronda \(rondaActual). Terminando ronda.")
+            break
+        }
+        
+    }
+    
+    // mostrar puntuaciones parciales
+    print("\n--- Marcador tras Ronda \(rondaActual) ---")
+    for jugador in jugadores {
+        print("• \(jugador.nombre): \(jugador.puntos) puntos")
+    }
+    
+    // reiniciar posiciones para siguiente round (roles se reasignarán al iniciar el próximo round)
+    reiniciar_para_nuevo_round(jugadores: jugadores.map { $0 as JugadorDeEscondidas }, ubicaciones: ubicaciones)
+}
+
+// -----------------------------
+// Resultado final
+// -----------------------------
+print("\n=== Juego finalizado: \(rondaActual) rondas jugadas ===")
+let ordenados = jugadores.sorted { $0.puntos > $1.puntos }
+print("🏆 Ranking final:")
+for (i, j) in ordenados.enumerated() {
+    print("\(i+1). \(j.nombre) — \(j.puntos) puntos")
+}
+
+print("\nGracias por jugar a las Escondidas (simulación).")
